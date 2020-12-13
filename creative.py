@@ -59,7 +59,7 @@ yTr2 = data[:,1]-data[:, 0]
 assert np.sum(np.where(yTr2<=0, 0, 1))==322
 xTr2 = data[:, 3:]
 
-weight2016 = 3
+weight2016 = 4
 xTr = np.hstack((xTr, xTr2))
 yTr = np.sign(weight2016*yTr + yTr2)
 yTr = np.where(yTr==-1, 0, yTr)
@@ -230,7 +230,7 @@ def kFoldCross(xTr, yTr, k, classifier):
 trainAcc, valAcc = kFoldCross(xTr, yTr, 5, deepnnClassifier)
 print("Average Training Accuracy: "+str(trainAcc))
 print("Average Validation Accuracy: "+str(valAcc))
-# 
+#
 # preds = deepnnClassifier(xTr, yTr, xTe)
 # preddf = pd.DataFrame(data=preds, index=FIPS, columns=["Result"])
 # preddf.index.name = "FIPS"
