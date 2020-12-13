@@ -230,8 +230,8 @@ def kFoldCross(xTr, yTr, k, classifier):
 trainAcc, valAcc = kFoldCross(xTr, yTr, 5, deepnnClassifier)
 print("Average Training Accuracy: "+str(trainAcc))
 print("Average Validation Accuracy: "+str(valAcc))
-
-preds = deepnnClassifier(xTr, yTr, xTe)
-preddf = pd.DataFrame(data=preds, index=FIPS, columns=["Result"])
-preddf.index.name = "FIPS"
-preddf.to_csv("creativepreds.csv")
+# 
+# preds = deepnnClassifier(xTr, yTr, xTe)
+# preddf = pd.DataFrame(data=preds, index=FIPS, columns=["Result"])
+# preddf.index.name = "FIPS"
+# preddf.to_csv("creativepreds.csv")
