@@ -41,7 +41,6 @@ data[:,2] = tmp
 yTr = data[:,1]-data[:, 0]
 assert np.sum(np.where(yTr<=0, 0, 1))==225
 xTr = data[:, 2:]
-# xTr = data[:, 3:]
 
 df = pd.read_csv("./data/train_2012.csv", sep=',',header=None, encoding='unicode_escape')
 data = df.to_numpy()
@@ -55,7 +54,6 @@ tmp = np.copy(data[:,0])
 data[:,0] = data[:,2]
 data[:,2] = tmp
 yTr2 = data[:,1]-data[:, 0]
-#yTr = yTr.astype(np.long)
 assert np.sum(np.where(yTr2<=0, 0, 1))==322
 xTr2 = data[:, 3:]
 
@@ -75,7 +73,6 @@ for county in xTe:
     county[0] = (ord(county[0][-2])-ordA)*26+(ord(county[0][-1])-ordA)
     county[1] = county[1].replace(",", "")
 xTe = xTe.astype(np.float32)
-# xTe = xTe[:,1:]
 
 testdf = pd.read_csv("./data/test_2012_no_label.csv", sep=',',header=None, encoding='unicode_escape')
 xTe2 = testdf.to_numpy()
@@ -230,8 +227,8 @@ def kFoldCross(xTr, yTr, k, classifier):
 trainAcc, valAcc = kFoldCross(xTr, yTr, 5, deepnnClassifier)
 print("Average Training Accuracy: "+str(trainAcc))
 print("Average Validation Accuracy: "+str(valAcc))
-#
-# preds = deepnnClassifier(xTr, yTr, xTe)
-# preddf = pd.DataFrame(data=preds, index=FIPS, columns=["Result"])
-# preddf.index.name = "FIPS"
-# preddf.to_csv("creativepreds.csv")
+
+preds = deepnnClassifier(xTr, yTr, xTe)
+preddf = pd.DataFrame(data=preds, index=FIPS, columns=["Result"])
+preddf.index.name = "FIPS"
+preddf.to_csv("creativepreds.csv")
