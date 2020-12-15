@@ -5,15 +5,106 @@ import random
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
 
-import torch
-from torch.utils.data import Dataset
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-from torch.utils.data import DataLoader
+# Loading training features.
+df = pd.read_csv("train_2016.csv", sep=',',header=None, encoding='unicode_escape')
+data = df.to_numpy()
+data = data[1:, 1:]
+ordA = ord("A")
+for county in data:
+    # This converts the state of the county to a unique number between 1 and 26*26.
+    county[0] = (ord(county[0][-2])-ordA)*26+(ord(county[0][-1])-ordA)
+    county[3] = county[3].replace(",", "")
+data = data.astype(np.float32)
+tmp = np.copy(data[:,0])
+data[:,0] = data[:,2]
+data[:,2] = tmp
+xTr = data[:, 2:]
 
+# Generating Labels
+yTr = np.sign(data[:,1]-data[:, 0])
+yTr = np.where(yTr==-1, 0, yTr)
+assert np.sum(yTr)==225 # sanity check
 
+# Loading test features.
+testdf = pd.read_csv("test_2016_no_label.csv", sep=',',header=None, encoding='unicode_escape')
+xTe = testdf.to_numpy()
+FIPS = xTe[1:, 0] # Storing to later write preds file.
+xTe = xTe[1:, 1:]
+ordA = ord("A")
+for county in xTe:
+    # This converts the state of the county to a unique number between 1 and 26*26.
+    county[0] = (ord(county[0][-2])-ordA)*26+(ord(county[0][-1])-ordA)
+    county[1] = county[1].replace(",", "")
+xTe = xTe.astype(np.float32)
+
+def preprocess(xTr, xTe):
+    """
+    Preproces the data by normalizing to make the training features have zero-mean and
+    standard-deviation 1.
+
+    Parameters:
+        xTr: nxd training data.
+        xTe: mxd testing data.
+    Returns:
+        nxd matrix of pre-processed (normalized) training data.
+        mxd matrix of pre-processed (normalized) testing data.
+    """
+    ntr, d = xTr.shape
+    nte, _ = xTe.shape
+    m = np.mean(xTr, axis=0)
+    s = np.std(xTr, axis=0)
+    xTr = (xTr-m)/s
+    xTe = (xTe-m)/s
+    return xTr, xTe
+
+# First training algorithm: weighted kNNClassifier
+def kNNClassifier(xtrain, ytrain, xtest, k):
+    """
+    Weighted kNN Classifer
+
+    Parameters:
+        xtrain: nxd training features.
+        ytrain: n training labels.
+        xtest: mxd test features (features one wants predictions of)
+        k: number of neighbours to run kNN with.
+    Returns:
+        binary predictions for xtest after learning from given data.
+    """
+    xtrain, xtest = preprocess(xtrain, xtest)
+    neigh = KNeighborsClassifier(n_neighbors=k, weights="distance")
+    neigh.fit(xtrain, ytrain)
+    return neigh.predict(xtest)
+
+# Second training algorithm: soft-margin SVM
+def SVMClassifier(xtrain, ytrain, xtest, C, kernel):
+    """
+    Soft Margin SVM
+
+    Parameters:
+        xtrain: nxd training features.
+        ytrain: n training labels.
+        xtest: mxd test features (features one wants predictions of)
+        C: Weightage given to slack variables.
+        Kernel: The kernel with which to run the SVM.
+    Returns:
+        binary predictions for xtest after learning from given data.
+    """
+    xtrain, xtest = preprocess(xtrain, xtest)
+    sv = SVC(C=C, kernel=kernel)
+    sv.fit(xtrain, ytrain)
+    return sv.predict(xtest)
+
+# Validation, Training and Model Selection
 def weighted_accuracy(pred, true):
+    """
+    Compute weighted accuracy of predictions
+
+    Parameters:
+        pred: n predictions.
+        true: n true labels.
+    Returns:
+        weighted accuracy of predictions based on number of positive and negative true labels.
+    """
     assert(len(pred) == len(true))
     num_labels = len(true)
     num_pos = sum(true)
@@ -30,80 +121,23 @@ def weighted_accuracy(pred, true):
                          + (weight_neg * num_neg_correct))/((weight_pos * num_pos) + (weight_neg * num_neg))
     return weighted_accuracy
 
-
-# Loading training features and computing labels.
-df = pd.read_csv("train_2016.csv", sep=',',header=None, encoding='unicode_escape')
-data = df.to_numpy()
-data = data[1:, 1:]
-ordA = ord("A")
-for county in data:
-    county[0] = (ord(county[0][-2])-ordA)*26+(ord(county[0][-1])-ordA)
-    county[3] = county[3].replace(",", "")
-data = data.astype(np.float32)
-tmp = np.copy(data[:,0])
-data[:,0] = data[:,2]
-data[:,2] = tmp
-yTr = np.sign(data[:,1]-data[:, 0])
-yTr = np.where(yTr==-1, 0, yTr)
-assert np.sum(yTr)==225
-xTr = data[:, 2:]
-# xTr = data[:, 3:]
-
-# Loading test features.
-testdf = pd.read_csv("test_2016_no_label.csv", sep=',',header=None, encoding='unicode_escape')
-xTe = testdf.to_numpy()
-FIPS = xTe[1:, 0]
-xTe = xTe[1:, 1:]
-ordA = ord("A")
-for county in xTe:
-    county[0] = (ord(county[0][-2])-ordA)*26+(ord(county[0][-1])-ordA)
-    county[1] = county[1].replace(",", "")
-xTe = xTe.astype(np.float32)
-# xTe = xTe[:,1:]
-
-def preprocess(xTr, xTe):
-    """
-    Preproces the data to make the training features have zero-mean and
-    standard-deviation 1
-    OUPUT:
-        xTr - nxd training data
-        xTe - mxd testing data
-    OUPUT:
-        xTr - pre-processed training data
-        xTe - pre-processed testing data
-        s,m - standard deviation and mean of xTr
-            - any other data should be pre-processed by x-> (x-m)/s
-    (The size of xTr and xTe should remain unchanged)
-    """
-    ntr, d = xTr.shape
-    nte, _ = xTe.shape
-    m = np.mean(xTr, axis=0)
-    s = np.std(xTr, axis=0)
-    xTr = (xTr-m)/s
-    xTe = (xTe-m)/s
-    return xTr, xTe
-
-# First training algorithm: kNNClassifier
-def kNNClassifier(xtrain, ytrain, xtest, k):
-    xtrain, xtest = preprocess(xtrain, xtest)
-    neigh = KNeighborsClassifier(n_neighbors=k, weights="distance")
-    neigh.fit(xtrain, ytrain)
-    return neigh.predict(xtest)
-
-# Second training algorithm: SVM
-def SVMClassifier(xtrain, ytrain, xtest, C, kernel):
-    xtrain, xtest = preprocess(xtrain, xtest)
-    sv = SVC(C=C, kernel=kernel)
-    sv.fit(xtrain, ytrain)
-    return sv.predict(xtest)
-
-# Validation, Training and Model Selection
 def kFoldCross(xTr, yTr, k, classifier):
     """
     kFoldCross for Estimating Prediction Error and Calculating Training Error.
+
+    Parameters:
+        xTr: nxd training features.
+        yTr: n training labels.
+        k: number of pieces to break xTr and yTr into. 1 piece is used as validation set.
+        classifier: function that takes training features, training labels, and test features as input
+                    to give predictions. (the classier one is validating with kFoldCross)
+    Returns:
+        Average training loss.
+        Average validation loss.
     """
     totTrain = 0; totVal = 0;
     for i in range(0, k):
+        # data is split into (k-1) pieces to train and 1 piece to validate on
         splitIndices = (i*len(xTr)//k, (i+1)*len(xTr)//k)
         if 0 in splitIndices:
             xt = xTr[splitIndices[1]:]
@@ -116,15 +150,16 @@ def kFoldCross(xTr, yTr, k, classifier):
             yt = np.concatenate((yTr[:splitIndices[0]], yTr[splitIndices[1]:]))
         xv = xTr[splitIndices[0]:splitIndices[1]]
         yv = yTr[splitIndices[0]:splitIndices[1]]
-        totTrain+= weighted_accuracy(classifier(xt, yt, xt), yt)
-        totVal+= weighted_accuracy(classifier(xt, yt, xv), yv)
-    return totTrain/k, totVal/k
 
+        totTrain+= weighted_accuracy(classifier(xt, yt, xt), yt) # compute training accuracy
+        totVal+= weighted_accuracy(classifier(xt, yt, xv), yv) # compute validation accuracy
 
-# k = 10
+    return totTrain/k, totVal/k # return average training and test error
+
+# k = 5
 # bestAcc = -float("inf")
 # # Generating Predictions
-# for i in range(1, 11):
+# for i in range(1, 11): # parameter selection for number of neighbours from 1-11
 #     print("Running "+str(k)+"-FoldCross for "+str(i)+"-NNClassifier.")
 #     trainAcc, valAcc = kFoldCross(xTr, yTr, 5, lambda xt, yt, xv: kNNClassifier(xt, yt, xv, i))
 #     print("Average Training Accuracy: "+str(trainAcc))
@@ -134,10 +169,11 @@ def kFoldCross(xTr, yTr, k, classifier):
 #         bestAcc = valAcc
 #         bestK = i
 
-k = 5
+# Manually found SVM has better performance using printed validation values and McNemar's test.
+
+k = 5 # for kfoldcross
 bestAcc = -float("inf")
-Cs = [50.30, 50.31, 50.32, 50.33, 50.34]
-# Generating Predictions
+Cs = [50.30, 50.31, 50.32, 50.33, 50.34] # good range of C values found through manual telescopic search
 for C in Cs:
     print("Running SVM with C "+str(C)+" and rbf kernel.")
     trainAcc, valAcc = kFoldCross(xTr, yTr, 5, lambda xt, yt, xv: SVMClassifier(xt, yt, xv, C, "rbf"))
@@ -148,55 +184,8 @@ for C in Cs:
         bestAcc = valAcc
         bestC = C
 
-# print("Running NN.")
-# trainAcc, valAcc = kFoldCross(xTr, yTr, 5, lambda xt, yt, xv: deepnnClassifier(xt, yt, xv))
-# print("Average Training Accuracy: "+str(trainAcc))
-# print("Average Validation Accuracy: "+str(valAcc))
-# print()
-
-
 # Writing CSV File
-print("Best C: "+str(bestC))
 preds = SVMClassifier(xTr, yTr, xTe, bestC, "rbf").astype(np.int)
 preddf = pd.DataFrame(data=preds, index=FIPS, columns=["Result"])
 preddf.index.name = "FIPS"
 preddf.to_csv("preds.csv")
-
-
-# TODO
-# 2.4 Explanation in Words:
-# You need to answer the following questions in the markdown cell after this cell:
-
-# 2.4.1 How did you preprocess the dataset and features?
-
-# 2.4.2 Which two learning methods from class did you choose and why did you made the choices?
-
-# 2.4.3 How did you do the model selection?
-
-# 2.4.4 Does the test performance reach a given baseline 68% performanc? (Please include a screenshot of Kaggle Submission)
-
-################################################################################
-
-# Type Markdown and LaTeX:
-# Part 3: Creative Solution
-# 3.1 Open-ended Code:
-# You may follow the steps in part 2 again but making innovative changes like creating new features, using new training algorithms, etc. Make sure you explain everything clearly in part 3.2. Note that reaching the 75% creative baseline is only a small portion of this part. Any creative ideas will receive most points as long as they are reasonable and clearly explained.
-
-# # Make sure you comment your code clearly and you may refer to these comments in the part 3.2
-# # TODO
-# 3.2 Explanation in Words:
-# You need to answer the following questions in a markdown cell after this cell:
-
-# 3.2.1 How much did you manage to improve performance on the test set compared to part 2? Did you reach the 75% accuracy for the test in Kaggle? (Please include a screenshot of Kaggle Submission)
-
-# 3.2.2 Please explain in detail how you achieved this and what you did specifically and why you tried this.
-
-# Type Markdown and LaTeX: 𝛼2
-# Part 4: Kaggle Submission
-# You need to generate a prediction CSV using the following cell from your trained model and submit the direct output of your code to Kaggle. The CSV shall contain TWO column named exactly "FIPS" and "Result" and 1555 total rows excluding the column names, "FIPS" column shall contain FIPS of counties with same order as in the test_2016_no_label.csv while "Result" column shall contain the 0 or 1 prdicaitons for corresponding columns. A sample predication file can be downloaded from Kaggle.
-
-# TODO
-# You may use pandas to generate a dataframe with FIPS and your predictions first
-# and then use to_csv to generate a CSV file.
-# Part 5: Resources and Literature Used
-# Type Markdown and LaTeX: 𝛼
